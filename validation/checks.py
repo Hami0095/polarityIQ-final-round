@@ -8,13 +8,50 @@ audit/rejected log, per PROJECT_BRIEF.md's honesty rules.
 from __future__ import annotations
 
 import re
+import time
 
 import dns.resolver
 import phonenumbers
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
-_mx_cache: dict[str, bool] = {}
+_mx_cache: dict[str, tuple[bool, str]] = {}
+
+
+class MXCheckInconclusive(Exception):
+    """Raised when MX lookup couldn't get a definitive answer (network
+    timeout, resolver error) after retries — this is NOT the same as
+    NXDOMAIN/NoAnswer, which are definitive negatives. Treating a timeout
+    as "undeliverable" would wrongly null out a possibly-valid address, so
+    callers must not silently swallow this into a pass/fail."""
+
+
+def _resolve_mx(domain: str, retries: int = 3, delay: float = 1.5) -> tuple[bool, str]:
+    if domain in _mx_cache:
+        return _mx_cache[domain]
+
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            dns.resolver.resolve(domain, "MX")
+            result = (True, "MX record found")
+            _mx_cache[domain] = result
+            return result
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer) as e:
+            # definitive: domain doesn't exist or genuinely has no MX record
+            result = (False, f"no MX record ({type(e).__name__}) — domain cannot receive mail")
+            _mx_cache[domain] = result
+            return result
+        except Exception as e:  # timeout, resolver/network error — not definitive
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(delay)
+
+    raise MXCheckInconclusive(
+        f"MX lookup for {domain} did not get a definitive answer after {retries} attempts "
+        f"(last error: {type(last_err).__name__}: {last_err}) — this is a network/resolver "
+        f"issue, not evidence the address is undeliverable."
+    )
 
 
 def check_email(email: str) -> tuple[bool, str]:
@@ -22,19 +59,11 @@ def check_email(email: str) -> tuple[bool, str]:
         return False, "failed syntax check"
 
     domain = email.split("@", 1)[1]
-    if domain in _mx_cache:
-        has_mx = _mx_cache[domain]
-    else:
-        try:
-            dns.resolver.resolve(domain, "MX")
-            has_mx = True
-        except Exception as e:  # NXDOMAIN, NoAnswer, Timeout, etc.
-            has_mx = False
-        _mx_cache[domain] = has_mx
+    has_mx, detail = _resolve_mx(domain)  # raises MXCheckInconclusive if genuinely unresolvable
 
     if not has_mx:
-        return False, "syntax OK but domain has no MX record (undeliverable)"
-    return True, "syntax OK, domain has valid MX record"
+        return False, f"syntax OK but {detail} (undeliverable)"
+    return True, f"syntax OK, {detail}"
 
 
 def check_phone(number: str, region: str = "US") -> tuple[bool, str]:

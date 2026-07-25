@@ -8,9 +8,40 @@ import csv
 from pathlib import Path
 
 from dataset.schema import Confidence, Firm
-from validation.checks import check_email, check_phone
+from validation.checks import MXCheckInconclusive, check_email, check_phone
 
 FINAL_DIR = Path(__file__).resolve().parent.parent / "data" / "final"
+
+SOURCE_CAP = 0.35  # hard budget, not a preference — see DECISIONS.md 2026-07-25 work item 1
+
+
+class SourceConcentrationError(Exception):
+    """Raised when a single discovery_source exceeds SOURCE_CAP of the qualifying
+    set. This must halt assembly, not just print a warning — a dataset with a
+    dominant source fails the brief's single most common failure mode."""
+
+
+def source_mix(firms: list[Firm]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for firm in firms:
+        counts[firm.discovery_source] = counts.get(firm.discovery_source, 0) + 1
+    return counts
+
+
+def enforce_source_cap(firms: list[Firm], cap: float = SOURCE_CAP) -> None:
+    counts = source_mix(firms)
+    total = len(firms)
+    violations = {src: c for src, c in counts.items() if c / total > cap}
+    if violations:
+        lines = "\n".join(
+            f"  {src}: {c}/{total} = {100*c/total:.0f}% (cap is {100*cap:.0f}%)"
+            for src, c in violations.items()
+        )
+        raise SourceConcentrationError(
+            "Refusing to assemble dataset: one or more discovery sources exceed the "
+            f"{100*cap:.0f}% cap.\n{lines}\n"
+            "Add qualifying candidates from other discovery channels before re-running."
+        )
 
 FIELDS = [
     "firm_id", "name", "classification", "classification_evidence",
@@ -19,26 +50,45 @@ FIELDS = [
     "sectors", "sectors_source",
     "aum", "aum_source", "aum_confidence",
     "hq_city", "hq_state", "hq_country", "domain", "website",
-    "firm_email", "firm_email_validation",
-    "firm_phone", "firm_phone_validation",
+    "firm_email", "firm_email_checked_at",
+    "firm_phone", "firm_phone_checked_at",
     "discovery_source", "discovery_url",
-    "principal_1_name", "principal_1_title",
-    "principal_2_name", "principal_2_title",
+    "contact_actionability",
+    "principal_1_name", "principal_1_title", "principal_1_email", "principal_1_phone", "principal_1_linkedin",
+    "principal_2_name", "principal_2_title", "principal_2_email", "principal_2_phone", "principal_2_linkedin",
     "signal_1", "signal_1_source", "signal_2", "signal_2_source",
     "blind_spots",
 ]
 
 
-def validate_and_null(firm: Firm, audit_log: list[dict]) -> Firm:
-    """Run real checks on email/phone; null the delivered field on failure
-    and record the failure in the audit log rather than silently dropping it."""
+def _check_email_field(firm_id: str, field_name: str, value: str, audit_log: list[dict],
+                        inconclusive_log: list[dict]) -> tuple[str | None, bool]:
+    """Returns (value_to_keep, was_nulled). On a genuine failure, nulls and
+    logs to audit_log. On a network/DNS timeout (inconclusive), keeps the
+    value as-is and logs to inconclusive_log instead — a timeout is not
+    evidence the address is bad, and must not silently null real data."""
+    try:
+        ok, detail = check_email(value)
+    except MXCheckInconclusive as e:
+        inconclusive_log.append({"firm_id": firm_id, "field": field_name,
+                                  "value": value, "reason": str(e)})
+        return value, False
+    if not ok:
+        audit_log.append({"firm_id": firm_id, "field": field_name,
+                           "attempted_value": value, "reason": detail})
+        return None, True
+    return value, False
+
+
+def validate_and_null(firm: Firm, audit_log: list[dict], inconclusive_log: list[dict]) -> Firm:
+    """Run real checks on email/phone; null the delivered field on a genuine
+    failure and record it in the audit log. Inconclusive checks (DNS
+    timeouts) leave the field untouched but get their own log so they're
+    visible without being treated as proof of anything."""
     if firm.firm_email.value:
-        ok, detail = check_email(firm.firm_email.value)
-        if not ok:
-            audit_log.append({
-                "firm_id": firm.firm_id, "field": "firm_email",
-                "attempted_value": firm.firm_email.value, "reason": detail,
-            })
+        kept, nulled = _check_email_field(firm.firm_id, "firm_email", firm.firm_email.value,
+                                           audit_log, inconclusive_log)
+        if nulled:
             firm.firm_email.value = None
             firm.firm_email.confidence = Confidence.NONE
 
@@ -54,12 +104,11 @@ def validate_and_null(firm: Firm, audit_log: list[dict]) -> Firm:
 
     for p in firm.principals:
         if p.work_email.value:
-            ok, detail = check_email(p.work_email.value)
-            if not ok:
-                audit_log.append({
-                    "firm_id": firm.firm_id, "field": f"principal:{p.full_name}:work_email",
-                    "attempted_value": p.work_email.value, "reason": detail,
-                })
+            _, nulled = _check_email_field(
+                firm.firm_id, f"principal:{p.full_name}:work_email", p.work_email.value,
+                audit_log, inconclusive_log,
+            )
+            if nulled:
                 p.work_email.value = None
                 p.work_email.confidence = Confidence.NONE
         if p.direct_phone.value:
@@ -102,15 +151,22 @@ def to_row(firm: Firm) -> dict:
         "domain": firm.domain or "",
         "website": firm.website or "",
         "firm_email": firm.firm_email.value or "",
-        "firm_email_validation": firm.firm_email.verification_method or "",
+        "firm_email_checked_at": firm.firm_email.checked_at or "",
         "firm_phone": firm.firm_phone.value or "",
-        "firm_phone_validation": firm.firm_phone.verification_method or "",
+        "firm_phone_checked_at": firm.firm_phone.checked_at or "",
         "discovery_source": firm.discovery_source,
         "discovery_url": firm.discovery_url or "",
+        "contact_actionability": firm.contact_actionability().value,
         "principal_1_name": p1.full_name if p1 else "",
         "principal_1_title": p1.title if p1 else "",
+        "principal_1_email": p1.work_email.value if p1 else "",
+        "principal_1_phone": p1.direct_phone.value if p1 else "",
+        "principal_1_linkedin": p1.linkedin_url.value if p1 else "",
         "principal_2_name": p2.full_name if p2 else "",
         "principal_2_title": p2.title if p2 else "",
+        "principal_2_email": p2.work_email.value if p2 else "",
+        "principal_2_phone": p2.direct_phone.value if p2 else "",
+        "principal_2_linkedin": p2.linkedin_url.value if p2 else "",
         "signal_1": s1.description if s1 else "",
         "signal_1_source": s1.source_url if s1 else "",
         "signal_2": s2.description if s2 else "",
@@ -119,11 +175,27 @@ def to_row(firm: Firm) -> dict:
     }
 
 
-def assemble(firms: list[Firm], rejected: list[Firm], batch_name: str = "pilot") -> None:
+def assemble(
+    firms: list[Firm],
+    rejected: list[Firm],
+    batch_name: str = "pilot",
+    enforce_cap: bool = True,
+) -> None:
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
     audit_log: list[dict] = []
+    inconclusive_log: list[dict] = []
 
-    validated = [validate_and_null(f, audit_log) for f in firms]
+    validated = [validate_and_null(f, audit_log, inconclusive_log) for f in firms]
+
+    if inconclusive_log:
+        print(f"\nWARNING: {len(inconclusive_log)} email check(s) were inconclusive "
+              "(DNS timeout, not a real failure) and were left AS-IS rather than nulled:")
+        for row in inconclusive_log:
+            print(f"  {row['firm_id']} / {row['field']}: {row['value']}")
+        print("Re-run validation later to get a definitive answer for these.")
+
+    if enforce_cap:
+        enforce_source_cap(validated)  # raises SourceConcentrationError and halts
 
     out_csv = FINAL_DIR / f"{batch_name}_dataset.csv"
     with out_csv.open("w", newline="", encoding="utf-8") as f:
@@ -150,21 +222,46 @@ def assemble(firms: list[Firm], rejected: list[Firm], batch_name: str = "pilot")
         for row in audit_log:
             writer.writerow(row)
 
-    # source-concentration check
-    source_counts: dict[str, int] = {}
-    for firm in validated:
-        source_counts[firm.discovery_source] = source_counts.get(firm.discovery_source, 0) + 1
+    source_counts = source_mix(validated)
     total = len(validated)
     print(f"\n{batch_name}: {total} qualifying firms, {len(rejected)} rejected, "
           f"{len(audit_log)} contact fields failed validation and were nulled.")
     print("Discovery source distribution:")
     for src, count in sorted(source_counts.items(), key=lambda x: -x[1]):
-        pct = 100 * count / total
-        flag = "  <-- FLAG: exceeds ~30-40% of the batch" if pct > 40 else ""
-        print(f"  {src}: {count} ({pct:.0f}%){flag}")
+        print(f"  {src}: {count} ({100*count/total:.0f}%)")
+
+    print_contact_coverage(validated)
     print(f"\nWrote {out_csv}, {rejected_csv}, {audit_csv}")
+
+
+def print_contact_coverage(firms: list[Firm]) -> None:
+    def rate(pred, pool):
+        pool = list(pool)
+        if not pool:
+            return "n/a"
+        hit = sum(1 for f in pool if pred(f))
+        return f"{hit}/{len(pool)} ({100*hit/len(pool):.0f}%)"
+
+    groups = {"All": firms, "SFO": [f for f in firms if f.classification.value == "Single-Family Office"],
+              "MFO": [f for f in firms if f.classification.value == "Multi-Family Office"],
+              "UTD": [f for f in firms if f.classification.value == "Unable to Determine"]}
+
+    print("\nContact coverage:")
+    for label, pool in groups.items():
+        if not pool:
+            continue
+        named = rate(lambda f: any(p.full_name for p in f.principals), pool)
+        firm_contact = rate(lambda f: bool(f.firm_email.value or f.firm_phone.value), pool)
+        principal_contact = rate(
+            lambda f: any(p.work_email.value or p.direct_phone.value for p in f.principals), pool
+        )
+        print(f"  {label} (n={len(pool)}): named principal {named} | firm-level contact "
+              f"{firm_contact} | direct principal contact {principal_contact}")
 
 
 if __name__ == "__main__":
     from dataset.pilot_records import PILOT_FIRMS, REJECTED_FIRMS
-    assemble(PILOT_FIRMS, REJECTED_FIRMS, batch_name="pilot")
+    from dataset.pilot_records_batch2 import BATCH2_FIRMS
+    from dataset.pilot_records_batch3 import BATCH3_FIRMS
+    all_firms = PILOT_FIRMS + BATCH2_FIRMS + BATCH3_FIRMS
+    assemble(all_firms, REJECTED_FIRMS, batch_name="pilot")

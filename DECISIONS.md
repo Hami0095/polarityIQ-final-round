@@ -94,3 +94,124 @@ quality could be reviewed first. See `dataset/pilot_records.py`, `dataset/assemb
 - **Next step:** awaiting user review of the pilot before scaling the same discovery →
   enrichment → validation process to the full 50, adding more WebSearch-driven source classes
   (state UHNW directories, conference speaker/sponsor lists) to fix the EDGAR concentration.
+
+## 2026-07-25 — Response to pilot review: source cap enforcement + contact intelligence
+
+User reviewed the 9-firm pilot, independently re-verified three load-bearing claims (all held
+up), and approved the judgment quality. Gave two blocking work items before scaling to 50:
+(1) enforce the 35% source cap in code, not just print a warning, and diversify beyond EDGAR;
+(2) improve contact coverage without ever loosening the "only checkable, never guessed"
+standard, plus add legibility fields so sparsity reads as honest rather than lazy.
+
+**Work item 1 — done.**
+- `dataset/assemble.py` now has `enforce_source_cap()` / `SourceConcentrationError`: assembly
+  hard-fails (raises, writes nothing) if any `discovery_source` exceeds 35% of the qualifying
+  set. Confirmed it actually fires: ran it against the original 9-firm pilot (EDGAR at 67%)
+  and it raised and refused to write the CSV, before any new data was added.
+- Added 9 more qualifying firms across 6 new discovery-channel labels to dilute EDGAR:
+  Deal/Transaction Press (Real Capital Solutions / Arsenault Family Office), Regional Business
+  Press (Rock/Dan Gilbert Family Office, Angeles Family Office), University Donor/Foundation
+  Bridge (Pritzker Group / PSP Partners), Liquidity-Event Tracing (BLN Capital),
+  Conference/Association Speaker List (Bedrock Group — see caveat below), and Regional/Sector
+  Directory via billionaire-family-office lists (Excession/Musk, Willett Advisors/Bloomberg,
+  Cascade Investment/Gates).
+- **Final source mix at n=18 qualifying + 1 rejected** (table, as requested):
+
+  | Source | Count | % |
+  |---|---|---|
+  | SEC EDGAR Form D | 6 | 33% |
+  | Regional/Sector Directory (billionaire family office lists) | 3 | 17% |
+  | ProPublica Nonprofit Explorer (990) | 2 | 11% |
+  | Regional Business Press | 2 | 11% |
+  | Press search (WebSearch, ad hoc) | 1 | 6% |
+  | Deal/Transaction Press | 1 | 6% |
+  | University Donor/Foundation Bridge | 1 | 6% |
+  | Liquidity-Event Tracing | 1 | 6% |
+  | Conference/Association Speaker List | 1 | 6% |
+
+  EDGAR is now 33%, under the enforced 35% cap. Did not add further EDGAR candidates in this
+  pass per the instruction to hold it at ~6 until other channels caught up — they now have.
+
+**Work item 2 — done, with the ceiling named explicitly, not fought.**
+- Added `contact_actionability` (computed, not authored, from what actually survived
+  validation — see `Firm.contact_actionability()` in `dataset/schema.py`) and `checked_at` on
+  every `SourcedField`.
+- **Contact coverage at n=18** (as requested, by field and by classification):
+
+  | Group | n | Named principal | Firm-level contact | Direct principal contact |
+  |---|---|---|---|---|
+  | All | 18 | 13/18 (72%) | 6/18 (33%) | 1/18 (6%) |
+  | SFO | 10 | 10/10 (100%) | 3/10 (30%) | 1/10 (10%) |
+  | MFO | 7 | 3/7 (43%) | 3/7 (43%) | 0/7 (0%) |
+  | Unable to Determine | 1 | 0/1 | 0/1 | 0/1 |
+
+  This is exactly the inverse-opacity pattern flagged as expected: SFOs have 100% named-
+  principal coverage (their principals are public, well-known figures — that's *why* they're
+  discoverable at all) but only 1 direct contact across all 10; MFOs are more likely to publish
+  a general office line but less likely to have one obviously identifiable "the" principal.
+  The single direct-contact hit (Real Capital Solutions/Arsenault, see below) came from a firm
+  small and self-promotional enough to publish individual staff phone numbers — not
+  representative of the market, and said so rather than implying this is a repeatable rate.
+
+- **A real near-miss worth reporting exactly as asked:** WebFetch's summary of
+  `realcapitalsolutions.com/team/` reported a plausible `firstname@domain`-style email for
+  every team member. Before using any of them, I fetched the raw HTML directly with `requests`
+  and grepped for `@` — **none of those emails exist in the page's actual source.** The site
+  uses Cloudflare email obfuscation; WebFetch's summarizing model filled in a
+  plausible-looking placeholder instead of reporting "email present but obfuscated." Had I
+  trusted the tool's summary instead of checking raw source, I would have put fabricated
+  emails into the delivered file with a "verified" label — exactly the disqualifying failure
+  mode named in the brief. Caught it, left all those emails blank, and used only what was
+  actually verifiable in raw HTML (real phone numbers and LinkedIn URLs for named staff, which
+  did check out character-for-character). **Lesson applied going forward: any contact value
+  sourced via WebFetch's summary gets cross-checked against raw HTML before inclusion, not
+  just trusted.** This also means I should go back and spot-check the Virtus/PointOne/BLN/
+  Bedrock firm-level emails from the original pilot the same way — did so during this pass
+  (see below), and those four were genuinely present in raw HTML, not fabricated.
+- **A second tooling bug caught in this pass:** the email validator's MX/DNS check was
+  treating network timeouts the same as NXDOMAIN (definitive "no such domain"). Four real,
+  previously-verified emails (Virtus, PointOne, BLN Capital, Bedrock) got transient DNS
+  timeouts on a later run and were about to be silently nulled and logged as "undeliverable" —
+  which would have been false. Fixed `validation/checks.py` to retry on timeout and only treat
+  NXDOMAIN/NoAnswer as a genuine failure; timeouts now raise `MXCheckInconclusive` and the
+  affected field is left untouched (with a visible warning printed), not silently nulled. This
+  is the kind of validation-layer bug that would have quietly corrupted good data if I hadn't
+  cross-checked the "failures" by hand.
+- **Why the contact_audit_log is empty at n=18, and why that's not the same problem the user
+  flagged:** every contact value included in this batch was pre-filtered by manual raw-HTML
+  verification before it ever reached the validator (see the two catches above) — so nothing
+  reached assembly that was likely to fail. This is different from "validation never rejects
+  anything" — it's "I already did validation's job by hand during enrichment before handing
+  it off." At n=50, with far more contact fields harvested from more team pages under less
+  individual scrutiny per record, I expect the audit log to actually populate — flagging this
+  now rather than let an empty log look like validation is decorative.
+- **Things that didn't pan out (reported as asked, not quietly dropped):**
+  - Chamber-of-commerce / economic-development relocation-announcement search: returned zero
+    usable family-office leads — generic chamber content only. Not pursuing this specific
+    query pattern further; will try state-level "site selection" / corporate relocation press
+    instead if directory coverage needs more volume.
+  - Kimmelman/Energy Capital Partners: found a real 990-linked family foundation, but ECP
+    itself is a multi-LP private equity fund manager, not a clean single-entity family office,
+    and no distinctly-named Kimmelman family office turned up. Dropped rather than force-fit a
+    PE fund manager into the dataset as if it were a family office.
+  - Pritzker Group vs. PSP Partners: my research did not cleanly resolve whether these are one
+    entity or two related-but-distinct Pritzker-family vehicles (Anthony's side vs. Penny's
+    side) — recorded as one combined record with that ambiguity stated in `blind_spots` rather
+    than guessing a cleaner structure than what I actually confirmed. Will need a dedicated
+    pass to split this correctly before final delivery if both should count separately.
+  - Geller and Bedrock's classification is complicated by both having been acquired by Corient
+    (Jan 2025 and 2026 respectively) — kept both as MFO records with the acquisition uncertainty
+    stated in `blind_spots`, rather than either dropping them or pretending they still
+    obviously operate independently.
+  - No point in this pass where I was tempted to invent a value to hit a number — the closest
+    was wanting to mark the Real Capital Solutions emails "verified" straight from the WebFetch
+    summary before I did the raw-HTML check; that impulse is exactly what the raw-HTML
+    cross-check exists to catch, and I'm treating "always cross-check WebFetch's contact
+    extractions against raw source" as a standing rule from here on, not a one-time fix.
+
+**Files:** `dataset/pilot_records_batch2.py`, `dataset/pilot_records_batch3.py`,
+`dataset/assemble.py` (cap enforcement, contact coverage reporting), `validation/checks.py`
+(MX timeout fix), `tests/test_assemble.py`. `data/final/pilot_dataset.csv` now has 18 rows.
+
+**Not yet done, holding for user sign-off before proceeding:** scaling this same process to
+the full 50. The mix and coverage above are for review first, per the checkpoint instruction.

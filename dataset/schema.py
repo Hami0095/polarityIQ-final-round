@@ -27,12 +27,24 @@ class Classification(str, Enum):
     UNKNOWN = "Unable to Determine"
 
 
+class ContactActionability(str, Enum):
+    """How usable a record's contact info is today. Computed from what
+    actually made it through validation, not authored by hand, so it can't
+    drift from the delivered cells."""
+    NAMED_DIRECT = "Named principal + direct contact"
+    NAMED_FIRM_LEVEL = "Named principal + firm-level contact"
+    NAMED_NO_CONTACT = "Named principal, no contact"
+    FIRM_LEVEL_ONLY = "Firm-level contact only"
+    NONE = "No reachable contact"
+
+
 class SourcedField(BaseModel):
     """A single value plus how we know it."""
     value: Optional[str] = None
     source_url: Optional[str] = None
     verification_method: Optional[str] = None
     confidence: Confidence = Confidence.NONE
+    checked_at: Optional[str] = None  # ISO date the source/check was last run
 
     @property
     def is_verified(self) -> bool:
@@ -101,3 +113,22 @@ class Firm(BaseModel):
 
     blind_spots: Optional[str] = None
     rejected_reason: Optional[str] = None  # set if filtered out before final 50
+
+    def contact_actionability(self) -> ContactActionability:
+        """Computed from delivered (post-validation) cells only, so it can
+        never claim more than what's actually in the file."""
+        has_named_principal = any(p.full_name for p in self.principals)
+        has_principal_contact = any(
+            p.work_email.value or p.direct_phone.value for p in self.principals
+        )
+        has_firm_contact = bool(self.firm_email.value or self.firm_phone.value)
+
+        if has_named_principal and has_principal_contact:
+            return ContactActionability.NAMED_DIRECT
+        if has_named_principal and has_firm_contact:
+            return ContactActionability.NAMED_FIRM_LEVEL
+        if has_named_principal:
+            return ContactActionability.NAMED_NO_CONTACT
+        if has_firm_contact:
+            return ContactActionability.FIRM_LEVEL_ONLY
+        return ContactActionability.NONE
