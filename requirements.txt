@@ -1,0 +1,11 @@
+pandas>=2.0
+pydantic>=2.0
+openpyxl>=3.1
+requests>=2.32
+requests-cache>=1.2
+phonenumbers>=8.13
+dnspython>=2.6
+rapidfuzz>=3.0
+streamlit>=1.35
+sentence-transformers>=3.0
+chromadb>=0.5
