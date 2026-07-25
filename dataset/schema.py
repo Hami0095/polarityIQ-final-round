@@ -86,6 +86,8 @@ class Firm(BaseModel):
     domain: Optional[str] = None
     website: Optional[str] = None
     corporate_linkedin: Optional[str] = None
+    firm_email: SourcedField = Field(default_factory=SourcedField)  # general office contact, not attributed to an individual
+    firm_phone: SourcedField = Field(default_factory=SourcedField)
 
     classification: Classification = Classification.UNKNOWN
     classification_evidence: Optional[str] = None

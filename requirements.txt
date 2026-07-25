@@ -7,5 +7,4 @@ phonenumbers>=8.13
 dnspython>=2.6
 rapidfuzz>=3.0
 streamlit>=1.35
-sentence-transformers>=3.0
-chromadb>=0.5
+scikit-learn>=1.4
