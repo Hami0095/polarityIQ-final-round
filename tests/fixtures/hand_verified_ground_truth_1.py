@@ -1,10 +1,17 @@
-"""Pilot batch: 9 qualifying candidate firms + 1 explicitly rejected firm,
-hand-enriched from live WebSearch/WebFetch research on 2026-07-25, each
-field tagged with its source per PROJECT_BRIEF.md's cell-level proof rule.
+"""GROUND TRUTH FIXTURE — NOT A SHIPPED RECORD SOURCE.
 
-This is a pilot for user review before scaling the same process to 50.
-Every field left None below reflects "could not verify" during this pass,
-not an oversight — see blind_spots per record.
+Reclassified 2026-07-25 after a provenance review (see DECISIONS.md, "Question 0"). These 9
+qualifying + 1 rejected firms were hand-enriched from live WebSearch/WebFetch research
+conducted in-conversation on 2026-07-25 — i.e. field values were typed into this file by a
+human-in-the-loop research pass, not emitted by code that fetched and parsed a source at
+runtime. That is exactly the pattern the brief prohibits for delivered records: "must be
+produced by the pipeline... not manually assembled record-by-record."
+
+They are kept, not deleted, because they are still useful for a different purpose: a
+hand-verified answer key. benchmark/ runs the real (rebuilt) pipeline and measures discovery
+recall and field-level agreement against these values. The rule going forward is "pipeline
+output ships, hand research only measures" — nothing in this file is written to
+data/final/*.csv directly or backfilled into a pipeline-produced record.
 """
 from __future__ import annotations
 

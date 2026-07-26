@@ -1,9 +1,9 @@
-"""Batch 2: 5 more qualifying firms added specifically to fix source
-concentration (work item 1) and demonstrate the additional discovery
-channels + contact-sourcing techniques requested (work item 2), enriched
-2026-07-25. Contact fields below were cross-checked against raw HTML
-(not just the WebFetch summarizer — see DECISIONS.md for why that
-mattered) before being included.
+"""GROUND-TRUTH FIXTURE — NOT A SHIPPED RECORD SOURCE. See
+hand_verified_ground_truth_1.py for the full provenance note. Originally "batch 2", 5 more
+hand-researched firms, enriched 2026-07-25. Contact fields below were cross-checked against
+raw HTML (not just the WebFetch summarizer — see DECISIONS.md for why that mattered) before
+being included; that check is exactly what the new evidence_span validation gate in
+dataset/schema.py now enforces automatically for pipeline-produced records.
 """
 from __future__ import annotations
 

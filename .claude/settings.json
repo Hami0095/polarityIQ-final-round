@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(pip show *)",
+      "Bash(python -c \"import sklearn; print\\(sklearn.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(pip cache *)",
+      "WebSearch",
+      "Bash(python -m dataset.assemble)",
+      "Bash(python -c \"import os; print\\('ANTHROPIC_API_KEY' in os.environ, 'OPENAI_API_KEY' in os.environ\\)\")"
+    ]
+  }
+}

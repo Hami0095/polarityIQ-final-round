@@ -79,6 +79,22 @@ def check_phone(number: str, region: str = "US") -> tuple[bool, str]:
     return True, f"valid, region-checked, normalized to {formatted}"
 
 
+def check_evidence_span(field) -> tuple[bool, str]:
+    """Anti-fabrication gate: a SourcedField's value must be a literal
+    substring of its own evidence_span. Exists because of the Real Capital
+    Solutions incident (2026-07-25) — a WebFetch summary reported plausible
+    emails that were never in the page's raw HTML. Requiring the exact
+    fetched snippet at extraction time makes that failure mode a hard
+    validation failure instead of something caught by luck."""
+    if field.value is None:
+        return True, "no value to check"
+    if field.evidence_supports_value():
+        return True, "value present in its evidence_span"
+    if not field.evidence_span:
+        return False, "value has no evidence_span at all"
+    return False, "value not found in its own evidence_span (unsupported by source text)"
+
+
 def corroboration_ok(source_urls: list[str], min_sources: int = 2) -> tuple[bool, str]:
     """AUM/thesis-type claims need corroboration from >=2 independent sources
     (or 1 if it's a primary regulatory filing like SEC ADV/EDGAR)."""

@@ -9,3 +9,16 @@ data/raw/cache/
 .claude/settings.local.json
 pip_install.log
 
+# Scratch enrichment artifacts (fetched PDFs, cached text/JSON dumps from one-off research
+# passes) -- not part of the delivered dataset or pipeline, and ~90MB as of the final freeze.
+# candidates.jsonl is explicitly kept: it's load-bearing for benchmark/run.py's discovery-recall
+# check, not scratch.
+data/interim/*.pdf
+data/interim/*.txt
+data/interim/*.log
+data/interim/adv_pdfs/
+data/interim/edgar_13f_cache/
+data/interim/http_cache.sqlite*
+data/interim/*.json
+!data/interim/candidates.jsonl
+

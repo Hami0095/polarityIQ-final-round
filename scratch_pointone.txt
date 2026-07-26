@@ -1,0 +1,16 @@
+{
+  "description": {
+    "value": "Fiduciary Solutions & Wealth Management - Arrowworth Family Office\nSearch\nHome\nServices\nwwealth Management Services\nInvestment Management\nIndividual Retirement Account (IRA) \n529 Plan\nCorporate Retirement Plan\nThe financial planning services \nEquity Compensation\nFinancial Planning\nRirement Planning\nEstate Planning\nTax Planning\nM&A\nArrowroot Family Office LLC is a registered investment adviser with the U.S. Securities and Exchange Commission (\"SEC).\nRegistering with the SEC does not constitute an endorsement by the SEC, nor does it imply that AFO has attained a certain level of skill or ability. \nAFO is not engaged in the practice of law or accounting.\nAFO is structured as a fiduciary advisor company to protect clients from any legal conflicts and give you a level of responsibility with your finances."
+  },
+  "investment_thesis": {},
+  "sectors": {
+    ".financial management": ["Wealth Management", "Investment Management","Accounting"],
+    ".family office": ["Family Governance",  "Philanthropic Initiatives"]
+
+  },
+  "aum": "{457968708176}$, 286.1 $3B, $1.2B, $-64MM, 514 Billion",
+  "hq_city": "Marina del Rey",
+  "hq_state": "California",
+  "hq_country": "United States",
+  "firm_email": "None”, “@arrowrootfamilyoffice.com” , “[AFO LLC]”，“arrowrootfamily office”. }, 634, {20}   }    or null, the total value:  82150334987,  {3}{"
+  }

@@ -18,13 +18,17 @@ for the running log of choices and tradeoffs made while building this.
   just flagged.
 - `dataset/` — shared schema, final assembly (qualifying filter, dedup, cut to 50), CSV/XLSX
   output, methodology summary generated from run logs.
-- `rag/` — ingestion, chunking (structured filters vs. semantic text), retrieval, and a
-  code-enforced grounding/citation-check layer.
-- `app/` — non-technical UI (Streamlit) for querying the dataset.
+- `rag_app/` — the actual deployed Micro-RAG: TF-IDF retrieval, structured filters, template
+  synthesis, and a code-enforced grounding/citation-check layer, as a standalone Vercel
+  serverless function. Live at https://ragapp-sand.vercel.app. See `documentation-note.md` for
+  the stack write-up.
 - `data/` — `raw/` (source pulls), `interim/` (candidates, pre-validation), `final/`
   (delivered dataset + validation + audit logs).
 - `logs/` — structured run logs that the methodology summary is generated from.
-- `docs/` — stack choices, chunking strategy, live query transcripts.
+- `docs/` — live query transcripts against the deployed app (`live_queries.md`).
+- `app/`, `rag/` — early-plan stub packages (empty `__init__.py` only). Superseded by
+  `rag_app/`; not a Streamlit UI, not built out. Left in place rather than silently deleted,
+  flagged here so the layout description matches what's actually in the repo.
 
 ## Setup
 

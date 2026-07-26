@@ -7,8 +7,10 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from dataset.schema import Confidence, Firm
-from validation.checks import MXCheckInconclusive, check_email, check_phone
+from urllib.parse import urlparse
+
+from dataset.schema import Classification, Confidence, Firm, SourcedField
+from validation.checks import MXCheckInconclusive, check_email, check_evidence_span, check_phone
 
 FINAL_DIR = Path(__file__).resolve().parent.parent / "data" / "final"
 
@@ -28,31 +30,74 @@ def source_mix(firms: list[Firm]) -> dict[str, int]:
     return counts
 
 
+def _registrable_domain(url: str | None) -> str:
+    if not url:
+        return "(no discovery_url)"
+    netloc = urlparse(url).netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    # collapse EDGAR/ProPublica per-CIK/per-org subpaths to their host — the
+    # concentration risk is "one convenient website", not literal domain string
+    return netloc or "(unparseable)"
+
+
+def domain_mix(firms: list[Firm]) -> dict[str, int]:
+    """Missing discovery_url is excluded from the mix entirely — that's a
+    data-completeness gap, not evidence of domain concentration, and folding
+    it in would make every record without a URL count against every other
+    domain's ceiling."""
+    counts: dict[str, int] = {}
+    for firm in firms:
+        if not firm.discovery_url:
+            continue
+        d = _registrable_domain(firm.discovery_url)
+        counts[d] = counts.get(d, 0) + 1
+    return counts
+
+
+def _cap_violations(counts: dict[str, int], total: int, cap: float) -> dict[str, int]:
+    return {k: c for k, c in counts.items() if c / total > cap}
+
+
 def enforce_source_cap(firms: list[Firm], cap: float = SOURCE_CAP) -> None:
-    counts = source_mix(firms)
+    """Two independent checks, same cap, same hard-fail: channel-level
+    (self-assigned discovery_source label) and domain-level (registrable
+    domain of discovery_url). Channel-level alone lets whoever names the
+    channels decide whether the cap bites — three billionaire-list records
+    from two listicle domains once passed as "Regional/Sector Directory".
+    If channel-level passes but domain-level fails, domain-level wins."""
     total = len(firms)
-    violations = {src: c for src, c in counts.items() if c / total > cap}
-    if violations:
-        lines = "\n".join(
-            f"  {src}: {c}/{total} = {100*c/total:.0f}% (cap is {100*cap:.0f}%)"
-            for src, c in violations.items()
-        )
+
+    channel_counts = source_mix(firms)
+    channel_violations = _cap_violations(channel_counts, total, cap)
+
+    domain_counts = domain_mix(firms)
+    domain_total = sum(domain_counts.values()) or 1
+    domain_violations = _cap_violations(domain_counts, domain_total, cap)
+
+    if channel_violations or domain_violations:
+        lines = []
+        for src, c in channel_violations.items():
+            lines.append(f"  [channel] {src}: {c}/{total} = {100*c/total:.0f}% (cap is {100*cap:.0f}%)")
+        for dom, c in domain_violations.items():
+            lines.append(f"  [domain]  {dom}: {c}/{domain_total} = {100*c/domain_total:.0f}% (cap is {100*cap:.0f}%)")
         raise SourceConcentrationError(
-            "Refusing to assemble dataset: one or more discovery sources exceed the "
-            f"{100*cap:.0f}% cap.\n{lines}\n"
+            "Refusing to assemble dataset: one or more discovery sources/domains exceed the "
+            f"{100*cap:.0f}% cap.\n" + "\n".join(lines) + "\n"
             "Add qualifying candidates from other discovery channels before re-running."
         )
 
 FIELDS = [
-    "firm_id", "name", "classification", "classification_evidence",
-    "description", "description_source", "description_confidence",
+    "firm_id", "name", "family_office_confirmed", "classification", "classification_evidence",
+    "evidence_class", "evidence_class_detail",
+    "description", "description_source", "description_confidence", "description_evidence_span",
     "investment_thesis", "investment_thesis_source", "investment_thesis_confidence",
     "sectors", "sectors_source",
     "aum", "aum_source", "aum_confidence",
     "hq_city", "hq_state", "hq_country", "domain", "website",
-    "firm_email", "firm_email_checked_at",
-    "firm_phone", "firm_phone_checked_at",
-    "discovery_source", "discovery_url",
+    "firm_email", "firm_email_checked_at", "firm_email_evidence_span",
+    "firm_phone", "firm_phone_checked_at", "firm_phone_evidence_span",
+    "discovery_source", "discovery_url", "discovery_method",
     "contact_actionability",
     "principal_1_name", "principal_1_title", "principal_1_email", "principal_1_phone", "principal_1_linkedin",
     "principal_2_name", "principal_2_title", "principal_2_email", "principal_2_phone", "principal_2_linkedin",
@@ -80,11 +125,40 @@ def _check_email_field(firm_id: str, field_name: str, value: str, audit_log: lis
     return value, False
 
 
+def _sourced_fields(firm: Firm) -> list[tuple[str, SourcedField]]:
+    fields = [
+        ("description", firm.description), ("investment_thesis", firm.investment_thesis),
+        ("sectors", firm.sectors), ("aum", firm.aum),
+        ("firm_email", firm.firm_email), ("firm_phone", firm.firm_phone),
+    ]
+    for p in firm.principals:
+        fields.append((f"principal:{p.full_name}:work_email", p.work_email))
+        fields.append((f"principal:{p.full_name}:direct_phone", p.direct_phone))
+        fields.append((f"principal:{p.full_name}:linkedin_url", p.linkedin_url))
+    return fields
+
+
+def enforce_evidence_spans(firm: Firm, audit_log: list[dict]) -> Firm:
+    """Anti-fabrication gate, run before any other validation: every
+    SourcedField's value must be a literal substring of its own
+    evidence_span or it gets nulled and logged. See SourcedField docstring
+    and the Real Capital Solutions incident in DECISIONS.md."""
+    for field_name, field in _sourced_fields(firm):
+        ok, detail = check_evidence_span(field)
+        if not ok:
+            audit_log.append({"firm_id": firm.firm_id, "field": field_name,
+                               "attempted_value": field.value, "reason": f"evidence check: {detail}"})
+            field.value = None
+            field.confidence = Confidence.NONE
+    return firm
+
+
 def validate_and_null(firm: Firm, audit_log: list[dict], inconclusive_log: list[dict]) -> Firm:
     """Run real checks on email/phone; null the delivered field on a genuine
     failure and record it in the audit log. Inconclusive checks (DNS
     timeouts) leave the field untouched but get their own log so they're
     visible without being treated as proof of anything."""
+    firm = enforce_evidence_spans(firm, audit_log)
     if firm.firm_email.value:
         kept, nulled = _check_email_field(firm.firm_id, "firm_email", firm.firm_email.value,
                                            audit_log, inconclusive_log)
@@ -132,11 +206,15 @@ def to_row(firm: Firm) -> dict:
     return {
         "firm_id": firm.firm_id,
         "name": firm.name,
-        "classification": firm.classification.value,
+        "family_office_confirmed": "Yes" if firm.family_office_confirmed else "No",
+        "classification": firm.classification_display(),
         "classification_evidence": firm.classification_evidence or "",
+        "evidence_class": firm.evidence_class or "",
+        "evidence_class_detail": firm.evidence_class_detail or "",
         "description": firm.description.value or "",
         "description_source": firm.description.source_url or "",
         "description_confidence": firm.description.confidence.value,
+        "description_evidence_span": firm.description.evidence_span or "",
         "investment_thesis": firm.investment_thesis.value or "",
         "investment_thesis_source": firm.investment_thesis.source_url or "",
         "investment_thesis_confidence": firm.investment_thesis.confidence.value,
@@ -152,10 +230,13 @@ def to_row(firm: Firm) -> dict:
         "website": firm.website or "",
         "firm_email": firm.firm_email.value or "",
         "firm_email_checked_at": firm.firm_email.checked_at or "",
+        "firm_email_evidence_span": firm.firm_email.evidence_span or "",
         "firm_phone": firm.firm_phone.value or "",
         "firm_phone_checked_at": firm.firm_phone.checked_at or "",
+        "firm_phone_evidence_span": firm.firm_phone.evidence_span or "",
         "discovery_source": firm.discovery_source,
         "discovery_url": firm.discovery_url or "",
+        "discovery_method": firm.discovery_method or "",
         "contact_actionability": firm.contact_actionability().value,
         "principal_1_name": p1.full_name if p1 else "",
         "principal_1_title": p1.title if p1 else "",
@@ -180,6 +261,7 @@ def assemble(
     rejected: list[Firm],
     batch_name: str = "pilot",
     enforce_cap: bool = True,
+    cap: float = SOURCE_CAP,
 ) -> None:
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
     audit_log: list[dict] = []
@@ -195,7 +277,13 @@ def assemble(
         print("Re-run validation later to get a definitive answer for these.")
 
     if enforce_cap:
-        enforce_source_cap(validated)  # raises SourceConcentrationError and halts
+        # 2026-07-26: explicit, user-authorized override to 50% for this batch, after two full
+        # fix cycles (broadened classification lexicon, three new discovery channels, two
+        # evidence classes beyond first-party website self-description) still left the
+        # qualifying set at exactly two channels (ADV, Wikidata) each landing at 48%. This is
+        # not a silent bypass — cap is a real parameter, defaults to the standard 35%, and the
+        # override plus the reason is logged here and in DECISIONS.md.
+        enforce_source_cap(validated, cap=cap)  # raises SourceConcentrationError and halts
 
     out_csv = FINAL_DIR / f"{batch_name}_dataset.csv"
     with out_csv.open("w", newline="", encoding="utf-8") as f:
@@ -225,10 +313,15 @@ def assemble(
     source_counts = source_mix(validated)
     total = len(validated)
     print(f"\n{batch_name}: {total} qualifying firms, {len(rejected)} rejected, "
-          f"{len(audit_log)} contact fields failed validation and were nulled.")
-    print("Discovery source distribution:")
+          f"{len(audit_log)} fields failed validation and were nulled.")
+    print("Discovery source distribution (channel label):")
     for src, count in sorted(source_counts.items(), key=lambda x: -x[1]):
         print(f"  {src}: {count} ({100*count/total:.0f}%)")
+    dom_counts = domain_mix(validated)
+    dom_total = sum(dom_counts.values()) or 1
+    print("Discovery source distribution (registrable domain):")
+    for dom, count in sorted(dom_counts.items(), key=lambda x: -x[1]):
+        print(f"  {dom}: {count} ({100*count/dom_total:.0f}%)")
 
     print_contact_coverage(validated)
     print(f"\nWrote {out_csv}, {rejected_csv}, {audit_csv}")
@@ -244,7 +337,7 @@ def print_contact_coverage(firms: list[Firm]) -> None:
 
     groups = {"All": firms, "SFO": [f for f in firms if f.classification.value == "Single-Family Office"],
               "MFO": [f for f in firms if f.classification.value == "Multi-Family Office"],
-              "UTD": [f for f in firms if f.classification.value == "Unable to Determine"]}
+              "Subtype unconfirmed": [f for f in firms if f.classification == Classification.UNKNOWN]}
 
     print("\nContact coverage:")
     for label, pool in groups.items():
@@ -260,8 +353,17 @@ def print_contact_coverage(firms: list[Firm]) -> None:
 
 
 if __name__ == "__main__":
-    from dataset.pilot_records import PILOT_FIRMS, REJECTED_FIRMS
-    from dataset.pilot_records_batch2 import BATCH2_FIRMS
-    from dataset.pilot_records_batch3 import BATCH3_FIRMS
-    all_firms = PILOT_FIRMS + BATCH2_FIRMS + BATCH3_FIRMS
-    assemble(all_firms, REJECTED_FIRMS, batch_name="pilot")
+    # Pipeline output ships; hand research only measures (see DECISIONS.md, Question 0 and the
+    # rebuild that followed it). This entrypoint runs the real discovery->enrichment pipeline
+    # from whatever is in the candidate store — it no longer imports hand-authored records.
+    from enrichment.pipeline import qualifying, run_enrichment
+
+    firms, skipped, entity_rejected = run_enrichment()
+    qual = qualifying(firms)
+    print(f"{len(skipped)} candidate(s) skipped: no deterministic/LLM enricher available for "
+          "their discovery_source, or the primary source was unreachable/unparseable.")
+    print(f"{len(entity_rejected)} candidate(s) rejected by entity-type filter (fund vehicle / "
+          "institutional entity).")
+    print(f"{len(firms) - len(qual)} enriched firm(s) classified Unable to Determine — "
+          "not counted toward the qualifying set.")
+    assemble(qual, rejected=[], batch_name="pilot")
