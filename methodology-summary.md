@@ -104,6 +104,77 @@ broadened keyword pull returned **558 generic retail RIAs** that satisfied the s
 Subtype: SFO if HNW ≤ 5, MFO otherwise, `Subtype unconfirmed` where ambiguous. Subtype is never
 forced.
 
+## Terminology-driven 13F expansion: a null result, kept
+
+A cycle was run to test whether broadening the 13F name-filter vocabulary beyond the literal
+"family office" would surface qualifying candidates. **Cycle 1 first checked the premise against
+the confirmed pool itself: 30 of the 33 confirmed records use "Family Office(s)" verbatim in
+their legal name; none use "Family Capital," "Family Holdings," "Family Partners," "Family
+Group," "Family Investments," "Family Trust," or "Family Enterprises."** The hypothesized
+vocabulary isn't attested in what actually qualified — a real finding, reported before proceeding
+rather than after.
+
+Cycle 2 re-filtered the already-discovered 13F candidate pool (68 "family"-substring filers,
+cached from the original discovery pass — no new bulk fetch needed, since a bare "family" filter
+is already a superset of every more specific pattern) against that vocabulary: **7 new
+candidates** (Alpha Family Trust, American Family Investments, Family Capital Management, Family
+Capital Trust Co, Safe Harbor Family Capital, TLT Family Holdco, West Family Investments), none
+previously in the dataset or rejected list.
+
+Cycle 3 ran every candidate through the same bar as the existing 50, no relaxation: all 7 passed
+the entity-type filter (no fund-vehicle or institutional-service markers). 2 had an exact ADV
+match — both failed Item 5.D on the same rule that governs every other record in this file
+(Family Capital Management: 131 HNW clients, over the 60-client ceiling, plus nonzero charitable
+and corporate clients; Safe Harbor Family Capital: 10 HNW clients but a nonzero charitable-client
+count) — a institutional client, however small, disqualifies regardless of HNW count. Family
+Capital Management's self-disclosed website was fetched and run through the classifier with both
+guards anyway; it reads as a generic financial-planning practice, no affirmative single/multi-
+family language. The other 5 had no ADV match and no resolvable website — no evidence available
+by any channel checked.
+
+**Result: 0 of 7 candidates qualified.** All 7 logged to `pilot_rejected.csv` with the specific
+reason each failed. No new 13F record was added, so no ADV record was held back, and the file's
+composition, classification split, and evidence-class distribution are **unchanged from the
+prior freeze** — re-verified via `assemble()` (cap still fires correctly at exactly 25/50 =
+50.0%) and the live 15-query log (identical to the prior run). This cycle is recorded because a
+tested hypothesis that didn't pan out is still a real result, not because it changed the file.
+
+## 13F holdings deltas as dated signals
+
+For the 6 firms discovered via the SEC EDGAR 13F channel, the two most recent 13F-HR
+information-table filings were fetched and diffed for quarter-over-quarter position changes.
+This does not touch classification or discovery — it deepens the `signal` fields on records
+already in the file.
+
+**Labeling, deliberately narrow:** a delta is recorded as "New/Exited/Increased/Decreased
+13F-reportable position in [issuer], quarter ending [date]" — never as "new investment" or
+"conviction," for the same reason 13F holdings were already refused as an AUM proxy for Virtus
+earlier in this build: a 13F delta is evidence of a reportable position change, nothing more. It
+can result from rebalancing, redemptions, corporate actions (mergers, spinoffs, splits), or a
+custodian/sub-adviser change. 13F itself covers only certain US equity holdings (not private
+holdings, real estate, bonds, or cash) and is filed up to 45 days after quarter end, so a signal
+reflects a position as of the reporting date, not current holdings. This caveat is attached to
+every affected record's `blind_spots` field, not stated once and assumed remembered.
+
+**Selection rule:** the top 3-5 most material changes per firm, ranked by reported position
+value (new/exited position value, or the absolute dollar delta for a changed position),
+combined across all three change types and taken by magnitude. A full delta table would be
+dozens of minor line-item changes per firm — noise, not intelligence.
+
+**Result:** 5 of the 6 firms had a computable delta (both had ≥2 filings) and produced 3-5
+material signals each. **Capitol Family Office, Inc. produced zero** — verified directly against
+both raw information-table XML filings (48 holdings each quarter, identical composition, no
+position moved ≥25% in value) rather than assumed to be a parsing gap. No firm in this batch had
+only one 13F-HR filing on file, so the "record and move on" case didn't arise here, though the
+check was built to handle it.
+
+This did not change any coverage count: the 5 firms with new deltas already carried one generic
+"Form 13F-HR filed for period ending [date]" signal, counted in the existing `dated signal: 29`
+figure — this pass replaced that with up to 5 specific, material signals each, deepening content
+without changing coverage. `signal_3`/`signal_4`/`signal_5` columns (plus sources) were added to
+the schema and CSV to hold them; the prior 2-signal cap was a delivery-format limit, not a
+modeling one — `Firm.signals` was always an unbounded list internally.
+
 ## Classification is deterministic, not inferred
 
 Phrase matching over source text with enforced word boundaries. Evidence span captured

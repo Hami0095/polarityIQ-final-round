@@ -102,6 +102,7 @@ FIELDS = [
     "principal_1_name", "principal_1_title", "principal_1_email", "principal_1_phone", "principal_1_linkedin",
     "principal_2_name", "principal_2_title", "principal_2_email", "principal_2_phone", "principal_2_linkedin",
     "signal_1", "signal_1_source", "signal_2", "signal_2_source",
+    "signal_3", "signal_3_source", "signal_4", "signal_4_source", "signal_5", "signal_5_source",
     "blind_spots",
 ]
 
@@ -203,6 +204,9 @@ def to_row(firm: Firm) -> dict:
     p2 = firm.principals[1] if len(firm.principals) > 1 else None
     s1 = firm.signals[0] if len(firm.signals) > 0 else None
     s2 = firm.signals[1] if len(firm.signals) > 1 else None
+    s3 = firm.signals[2] if len(firm.signals) > 2 else None
+    s4 = firm.signals[3] if len(firm.signals) > 3 else None
+    s5 = firm.signals[4] if len(firm.signals) > 4 else None
     return {
         "firm_id": firm.firm_id,
         "name": firm.name,
@@ -252,6 +256,12 @@ def to_row(firm: Firm) -> dict:
         "signal_1_source": s1.source_url if s1 else "",
         "signal_2": s2.description if s2 else "",
         "signal_2_source": s2.source_url if s2 else "",
+        "signal_3": s3.description if s3 else "",
+        "signal_3_source": s3.source_url if s3 else "",
+        "signal_4": s4.description if s4 else "",
+        "signal_4_source": s4.source_url if s4 else "",
+        "signal_5": s5.description if s5 else "",
+        "signal_5_source": s5.source_url if s5 else "",
         "blind_spots": firm.blind_spots or "",
     }
 
