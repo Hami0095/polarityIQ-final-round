@@ -970,3 +970,18 @@ Re-ran the real `assemble()` pipeline (not ad hoc CSV writes) — `enforce_sourc
 and passed at exactly 25/50 = 50.0%. Redeployed, `firm_count: 50` confirmed live, 15-query log
 unchanged from the prior freeze. No classification changed as a result of this pass; the value
 was in confirming none needed to.
+
+## 2026-07-26 — Post-freeze closing pass: targeted SFO enrichment, 13F deltas, terminology expansion, final state
+
+After the bio-transition-guard freeze above, several more rounds of work ran before submission:
+a targeted enrichment pass specifically on the 4 SFO-classified records to raise `firm_email`
+coverage on the subtype the earlier ADV/Wikidata-heavy passes underserved; 13F holdings deltas
+reconciled against the latest quarterly index; a terminology-expansion cycle on the classification
+marker sets; and a full documentation reconciliation pass across `methodology-summary.md`,
+`documentation-note.md`, and this file, since the two write-ups had drifted out of sync with each
+other and with the CSV.
+
+**Final state: 29 Multi-Family Office, 4 Single-Family Office, 17 Subtype unconfirmed (50 total).
+`firm_email` coverage: 11/50.** This supersedes the 27/3/20 figures frozen earlier in this log —
+those were correct at the time written, not wrong, but this entry is the state that actually
+shipped.

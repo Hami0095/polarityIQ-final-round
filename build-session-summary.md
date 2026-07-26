@@ -1,10 +1,12 @@
 # Build Session Summary
 
-**Approximate working time:** ~16 hours across 4 sessions inside the 48-hour window (first
-commit 2026-07-25 16:07 to final freeze 2026-07-26 19:02 — about 27 hours of elapsed calendar
-time, with real gaps between sessions, not continuous effort). The hour figure is inferred from
-session content and `DECISIONS.md` entry density, not a timesheet — I don't have precise
-instrumentation of active-vs-idle time, and I'd rather say so than imply false precision.
+**Approximate working time:** ~16+ hours across 5+ sessions inside the 48-hour window (first
+commit 2026-07-25 16:07 through further work after the 2026-07-26 19:02 freeze — bio-transition
+guard fix, targeted SFO-record enrichment, 13F holdings deltas, a terminology-expansion cycle,
+and full documentation reconciliation — with real gaps between sessions, not continuous effort).
+The hour figure is inferred from session content and `DECISIONS.md` entry density, not a
+timesheet — I don't have precise instrumentation of active-vs-idle time, and I'd rather say so
+than imply false precision.
 
 **Sessions.**
 - **Session 1 (~2 hrs)** — Environment constraints confirmed, discovery channels built (Form ADV
@@ -29,6 +31,11 @@ instrumentation of active-vs-idle time, and I'd rather say so than imply false p
   mistakenly replaced a guard it wasn't actually a superset of, reinstated with a regression test;
   the RAG app's own header text found stuck at "28 records" through five expansions and fixed to
   read the live count; the five write-up deliverables produced and reconciled against the CSV.
+- **Session 5 (post-freeze)** — Bio-transition guard reinstated after the TriEdge false positive
+  exposed a collapsed-check gap; a targeted enrichment pass on the 4 SFO records specifically for
+  `firm_email`; 13F holdings deltas reconciled; a terminology-expansion cycle; final documentation
+  reconciliation across all deliverables (final state: 29 MFO / 4 SFO / 17 subtype unconfirmed,
+  `firm_email` 11/50).
 
 **What the AI produced vs. what I decided.** Claude Code wrote most of the implementation —
 connectors, parsers, the classifier, the RAG. My contribution was the decisions it couldn't make
@@ -46,6 +53,5 @@ contact-form dropdown.
 
 **What's still open, honestly:** field-level benchmark agreement against the ground-truth fixture
 did not complete — it requires a full live re-enrichment run that timed out; only the fast, local
-discovery-recall comparison ran (7/15). `firm_email` coverage is 9/50. Retrieval is lexical, not
-semantic, by explicit choice at this corpus size. No git remote is configured and nothing from
-this build has been committed or pushed.
+discovery-recall comparison ran (7/15). `firm_email` coverage is 11/50. Retrieval is lexical, not
+semantic, by explicit choice at this corpus size.
